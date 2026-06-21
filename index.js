@@ -82,7 +82,8 @@ async function checkForNewNews() {
                 '--disable-web-security',
                 '--disable-features=IsolateOrigins,site-per-process',
                 '--disable-gpu',
-                '--disable-dev-shm-usage'
+                '--disable-dev-shm-usage',
+                '--single-process'
             ]
         });
 
