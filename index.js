@@ -18,7 +18,7 @@ app.get('/', (req, res) => {
     res.send('BSE Persistent Set-Delta Cloud Surveillance Engine is fully operational!');
 });
 
-app.listen(PORT, () => {
+app.listen(PORT,'0.0.0.0', () => {
     console.log(`Server listening on port ${PORT}`);
 });
 
