@@ -106,7 +106,13 @@ async function checkForNewNews() {
             const validAnnouncements = [];
             
             for (let row of rows) {
-                const txt = row.innerText ? row.innerText.replace(/\s+/g, ' ').trim() : '';
+                //  NEW CLEANING PATTERN: Drop nested spans before extracting text
+                let rowClone = row.cloneNode(true);
+                const innerSpans = rowClone.querySelectorAll('span');
+                innerSpans.forEach(span => span.remove()); // Wipes out sub-descriptions completely
+
+                const txt = rowClone.innerText ? rowClone.innerText.replace(/\s+/g, ' ').trim() : '';
+                // const txt = row.innerText ? row.innerText.replace(/\s+/g, ' ').trim() : '';
                 
                 if (txt.length > 35 && txt.length < 600 && 
                     (txt.includes('Ltd') || txt.includes('Limited') || txt.includes('Infrastructure') || txt.includes('Announcement') || txt.includes('Company Update'))) {
