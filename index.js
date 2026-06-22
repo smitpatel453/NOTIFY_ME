@@ -1,200 +1,149 @@
-require('dotenv').config();
 const express = require('express');
-const puppeteer = require('puppeteer-extra');
-const StealthPlugin = require('puppeteer-extra-plugin-stealth');
+const puppeteer = require('puppeteer');
 const cron = require('node-cron');
 const axios = require('axios');
-const fs = require('fs');
-const path = require('path');
-
-// Apply stealth camouflage plugins to clean browser signatures
-puppeteer.use(StealthPlugin());
+require('dotenv').config();
 
 const app = express();
 const PORT = process.env.PORT || 3000;
-const CACHE_FILE_PATH = path.join(__dirname, 'cache.json');
+const NTFY_TOPIC = process.env.HALF_STR;
+// 'smit_news_aler23ts_7739';
 
+// Persistent local cache array to track seen announcement signatures
+let trackingCache = [];
+
+// Base routing check status for your Cron-Job.org keeping-alive network pings
 app.get('/', (req, res) => {
     res.send('BSE Persistent Set-Delta Cloud Surveillance Engine is fully operational!');
 });
 
-app.listen(PORT,'0.0.0.0', () => {
-    console.log(`Server listening on port ${PORT}`);
-});
+// Route to silence browser favicon 404 errors in your console log
+app.get('/favicon.ico', (req, res) => res.status(204).end());
 
-// A global Collection storing every unique headline fingerprint discovered today
-let historicalNewsCache = new Set();
-let isFirstSyncComplete = false;
-
-// Safe helper function to load saved baseline strings on container startup
-function loadCacheFromFile() {
-    try {
-        if (fs.existsSync(CACHE_FILE_PATH)) {
-            const rawData = fs.readFileSync(CACHE_FILE_PATH, 'utf8');
-            const parsedArray = JSON.parse(rawData);
-            if (Array.isArray(parsedArray)) {
-                historicalNewsCache = new Set(parsedArray);
-                isFirstSyncComplete = true;
-                console.log(`💾 CACHE LOADED: Restored ${historicalNewsCache.size} tracking signatures from persistent local storage.`);
-            }
-        }
-    } catch (err) {
-        console.error('⚠️ Cache storage read warning:', err.message);
-    }
-}
-
-// Safe helper function to save current memory reference fingerprints to disk layout
-function saveCacheToFile() {
-    try {
-        const arrayData = Array.from(historicalNewsCache);
-        fs.writeFileSync(CACHE_FILE_PATH, JSON.stringify(arrayData), 'utf8');
-    } catch (err) {
-        console.error('⚠️ Cache storage write error:', err.message);
-    }
-}
-
-async function sendNtfyNotification(newHeadline, previousTop2Text, link) {
-    const payload = `🚨 NEW RELEASES DETECTED!\n\n🆕 LATEST ADDITION:\n${newHeadline}\n\n📌 ACTIVE HIGHLIGHTS:\n${previousTop2Text}`;
-    
-    try {
-        await axios.post(process.env.NTFY_PUSH_URL, payload, {
-            headers: {
-                'Title': '🚨 New BSE Announcement!',
-                'Click': link,
-                'Priority': 'high'
-            }
-        });
-        console.log('✅ NTFY SUCCESS: Fresh database delta notification pushed.');
-    } catch (error) {
-        console.error('❌ NTFY ERROR: Mobile alert delivery failed:', error.message);
-    }
-}
-
-async function checkForNewNews() {
-    console.log('Scanning live BSE India corporate stream elements...');
+/**
+ * Core scraping orchestrator logic utilizing Option A node filtering
+ */
+async function runBseSurveillance() {
+    console.log('\nScanning live BSE India corporate stream elements...');
     let browser;
+
     try {
+        const isProduction = process.env.NODE_ENV === 'production';
+        
         browser = await puppeteer.launch({
             headless: true,
             args: [
                 '--no-sandbox',
                 '--disable-setuid-sandbox',
-                '--disable-web-security',
-                '--disable-features=IsolateOrigins,site-per-process',
-                '--disable-gpu',
-                '--disable-dev-shm-usage',
-                '--single-process'
+                // Uses single-process ONLY on cloud deployment to manage memory spikes safely
+                isProduction ? '--single-process' : '--disable-features=site-per-process'
             ]
         });
 
         const page = await browser.newPage();
-        await page.setViewport({ width: 1366, height: 768 });
-        await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36');
+        
+        // Block heavy, unneeded assets to minimize your Render outbound bandwidth bytes usage
+        await page.setRequestInterception(true);
+        page.on('request', (req) => {
+            if (['image', 'stylesheet', 'font', 'media'].includes(req.resourceType())) {
+                req.abort();
+            } else {
+                req.continue();
+            }
+        });
 
-        // Open primary layout target
-        await page.goto(process.env.BSE_TARGET_URL, {
+        // Navigate to the BSE Corporate Announcement streaming terminal
+        await page.goto('https://www.bseindia.com/corporates/anndet_new.aspx', {
             waitUntil: 'networkidle2',
             timeout: 60000
         });
 
-        // Wait explicitly for the dynamic data rows to clear the security challenge
-        await page.waitForSelector('tr[ng-repeat*="cann"], tr.ng-scope, td.TChor', { timeout: 30000 }).catch(() => {});
-        await new Promise(resolve => setTimeout(resolve, 4000));
+        // Tiny 2-second stabilization delay buffer to completely eliminate data frame detachment race conditions
+        await new Promise(resolve => setTimeout(resolve, 2000));
 
-        const currentAnnouncements = await page.evaluate(() => {
-            const rows = document.querySelectorAll('tr[ng-repeat*="cann"], tr.ng-scope, table tr');
-            const validAnnouncements = [];
+        // OPTION A DOM PARSING ENGINE: Targets and clones row contexts safely
+        const liveAnnouncements = await page.evaluate(() => {
+            // Find all anchor links that contain the PDF attachment icon download paths
+            const anchors = Array.from(document.querySelectorAll('a[href*="xmlData"]'));
             
-            for (let row of rows) {
-                //  NEW CLEANING PATTERN: Drop nested spans before extracting text
-                let rowClone = row.cloneNode(true);
-                const innerSpans = rowClone.querySelectorAll('span');
-                innerSpans.forEach(span => span.remove()); // Wipes out sub-descriptions completely
+            return anchors.map(anchor => {
+                // Navigate up the element hierarchy to find the main container row cell text
+                const parentTd = anchor.closest('td');
+                if (!parentTd) return null;
 
-                const txt = rowClone.innerText ? rowClone.innerText.replace(/\s+/g, ' ').trim() : '';
-                // const txt = row.innerText ? row.innerText.replace(/\s+/g, ' ').trim() : '';
-                
-                if (txt.length > 35 && txt.length < 600 && 
-                    (txt.includes('Ltd') || txt.includes('Limited') || txt.includes('Infrastructure') || txt.includes('Announcement') || txt.includes('Company Update'))) {
+                // Clone the cell node so we can alter it safely without breaking the live web application state
+                const clonedTd = parentTd.cloneNode(true);
+
+                // Strip away all secondary background elements (like internal script blocks or dynamic sub-spans)
+                const targetSpans = clonedTd.querySelectorAll('span');
+                targetSpans.forEach(span => span.remove());
+
+                // Return a clean text structure stripped of background junk data
+                return {
+                    text: clonedTd.innerText.trim(),
+                    link: anchor.href
+                };
+            }).filter(item => item !== null && item.text.length > 0);
+        });
+
+        console.log(`📊 LIVE CAPTURED DATASTREAM REPORT: FOUND ${liveAnnouncements.length} RECORDS.`);
+
+        // Handle the initial boot condition where cache is empty (prevents alert spam arrays)
+        if (trackingCache.length === 0) {
+            trackingCache = liveAnnouncements.map(item => item.text);
+            console.log(`💾 CACHE INITIALIZED: Baseline set with ${trackingCache.length} tracked signatures.`);
+            await browser.close();
+            return;
+        }
+
+        // Identify brand-new entries by checking them against our tracking array signatures
+        const newUploads = liveAnnouncements.filter(item => !trackingCache.includes(item.text));
+
+        if (newUploads.length > 0) {
+            console.log(`🚨 SURVEILLANCE INTERCEPT: Found ${newUploads.length} brand new uploads!`);
+
+            for (const record of newUploads) {
+                // Add the new record signature to the tracker array cache instantly
+                trackingCache.push(record.text);
+
+                // 🔍 CASE-INSENSITIVE KEYWORD FILTER ENGINE
+                const containsMeeting = record.text.toLowerCase().includes('meeting');
+
+                if (containsMeeting) {
+                    console.log(`🎯 MATCH FOUND: Processing alert transmission for 'Meeting'...`);
                     
-                    if (!/^\d+\./.test(txt) && 
-                        !txt.includes('disseminated seamlessly') && 
-                        !txt.includes('WITH ALL FAULTS') && 
-                        !txt.includes('pre-verified by the Exchange') &&
-                        !txt.includes('BSE Ltd (“Exchange”)') &&
-                        !txt.includes('Exchange Received Time Exchange')) {
-                        
-                        validAnnouncements.push(txt);
+                    const alertPayload = `🔔 BSE MEETING ALERT\n\n${record.text}\n\n🔗 PDF Link: ${record.link}`;
+
+                    try {
+                        // Dispatch the single filtered request payload to ntfy
+                        await axios.post(`https://ntfy.sh/${NTFY_TOPIC}`, alertPayload, {
+                            headers: { 'Title': 'BSE Corporate Announcement' }
+                        });
+                        console.log('✅ Notification successfully delivered to device.');
+                    } catch (ntfyErr) {
+                        console.error(`❌ NTFY ERROR: Mobile alert delivery failed: Request failed with status code ${ntfyErr.response ? ntfyErr.response.status : ntfyErr.message}`);
                     }
+
+                    // ⏱️ ANTI-SPAM TRAFFIC PACING DELAY BUFFER
+                    // Forces a clean 2-second sleep to completely eliminate HTTP 429 Rate Limits
+                    await new Promise(resolve => setTimeout(resolve, 2000));
+
+                } else {
+                    // Log out the ignored background records silently
+                    console.log(`skip alert: Filtered out (No 'meeting' context) -> "${record.text.substring(0, 35)}..."`);
                 }
             }
 
-            const uniqueAnnouncements = [...new Set(validAnnouncements)];
-
-            // Keep JSW Infrastructure cleanly pinned at Entry #1 for console logging purposes
-            const jswMatch = uniqueAnnouncements.find(item => item.includes('JSW Infrastructure Ltd'));
-            if (jswMatch) {
-                const filteredList = uniqueAnnouncements.filter(item => !item.includes('JSW Infrastructure Ltd'));
-                filteredList.unshift(jswMatch);
-                return filteredList;
+            // Keep memory trim by ensuring tracking array cache doesn't accumulate memory space forever
+            if (trackingCache.length > 200) {
+                trackingCache = trackingCache.slice(-150);
             }
-
-            return uniqueAnnouncements;
-        });
-
-        if (!currentAnnouncements || currentAnnouncements.length === 0) {
-            console.log('BSE text stream container empty or rendering frame delayed. Retrying next round...');
-            return;
-        }
-
-        // 1. DISPLAY ENTIRE LIVE CAPTURED LOG IN CONSOLE PANEL
-        console.log('\n================================================================');
-        console.log(`📊 LIVE CAPTURED DATASTREAM REPORT: FOUND ${currentAnnouncements.length} RECORDS`);
-        console.log('================================================================');
-        currentAnnouncements.forEach((headline, index) => {
-            console.log(`[ENTRY #${index + 1}]: ${headline}\n----------------------------------------------------------------`);
-        });
-        console.log('================================================================\n');
-
-        const articleLink = process.env.BSE_TARGET_URL;
-        const top1Text = currentAnnouncements[0] || 'N/A';
-        const top2Text = currentAnnouncements[1] || 'N/A';
-        const backupHighlights = `1️⃣ ${top1Text}\n\n2️⃣ ${top2Text}`;
-
-        // 2. INITIALIZATION STATE: Build baseline reference map if file cache was missing
-        if (!isFirstSyncComplete) {
-            currentAnnouncements.forEach(item => historicalNewsCache.add(item));
-            isFirstSyncComplete = true;
-            saveCacheToFile();
-            
-            console.log(`🎉 TRACKING SYNC ESTABLISHED!`);
-            console.log(`Initialized surveillance tracking pool with ${historicalNewsCache.size} unique records.`);
-            console.log(`Baseline locked onto current viewport snapshot.\n`);
-            return;
-        }
-
-        // 3. PERSISTENT DELTA ANALYSIS LOOP
-        let newlyDiscoveredItems = [];
-        for (let entry of currentAnnouncements) {
-            if (!historicalNewsCache.has(entry)) {
-                newlyDiscoveredItems.push(entry);
-            }
-        }
-
-        if (newlyDiscoveredItems.length > 0) {
-            console.log(`🚨 SURVEILLANCE INTERCEPT: Found ${newlyDiscoveredItems.length} brand new uploads!`);
-            
-            for (let newItem of newlyDiscoveredItems) {
-                historicalNewsCache.add(newItem);
-                await sendNtfyNotification(newItem, backupHighlights, articleLink);
-            }
-            saveCacheToFile(); // Commit updates permanently to the file tracker asset
         } else {
-            console.log(`Sync check complete: Snapshot size stable at ${historicalNewsCache.size} strings. No new corporate insertions.`);
+            console.log('⏭️ Stream verified. Zero delta updates detected across active matrices.');
         }
 
-    } catch (error) {
-        console.error('Data Stream Communication Fault:', error.message);
+    } catch (globalError) {
+        console.error('Data Stream Communication Fault:', globalError.message);
     } finally {
         if (browser) {
             await browser.close();
@@ -202,24 +151,14 @@ async function checkForNewNews() {
     }
 }
 
-// Attempt to restore historical dataset state from disk immediately prior to scanning loop launch
-loadCacheFromFile();
-checkForNewNews();
-
-// Scheduled monitoring cron loop (Runs automatically every 5 minutes)
+// Main operational background loop configured to check the stream every 5 minutes
 cron.schedule('*/5 * * * *', () => {
-    checkForNewNews();
+    runBseSurveillance();
 });
 
-// Render Deployment Keep-Alive script loop
-cron.schedule('*/10 * * * *', async () => {
-    try {
-        const selfUrl = process.env.RENDER_EXTERNAL_URL;
-        if (selfUrl) {
-            await axios.get(selfUrl);
-            console.log('Keep-Alive: Routine self-ping health check complete.');
-        }
-    } catch (err) {
-        // Safe fail-silent bypass
-    }
+// Spin up active listener interface for external incoming Cron-Job.org guard pings
+app.listen(PORT, () => {
+    console.log(`Server listening on port ${PORT}`);
+    // Optional: Trigger a direct scraping execution cycle right at app initialization startup
+    runBseSurveillance();
 });
