@@ -1,6 +1,12 @@
 require('dotenv').config();
 const express = require('express');
-const puppeteer = require('puppeteer');
+
+// const puppeteer = require('puppeteer');
+// 💻 CHANGE THIS SECTION: Use your loaded stealth plugin extensions
+const puppeteer = require('puppeteer-extra');
+const StealthPlugin = require('puppeteer-extra-plugin-stealth');
+puppeteer.use(StealthPlugin());
+
 const cron = require('node-cron');
 const axios = require('axios');
 
