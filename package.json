@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "main": "index.js",
   "scripts": {
-    "start": "node index.js",
+    "start": "NODE_ENV=production node index.js",
     "render-build": "npm install && npx puppeteer browsers install chrome"
   },
   "dependencies": {
